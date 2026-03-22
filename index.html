@@ -208,10 +208,14 @@
   <div id="content"></div>
 
   <script>
+    const SUPABASE_URL = 'https://dhwllgdxpeucldtmzhme.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRod2xsZ2R4cGV1Y2xkdG16aG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyMzI2NTMsImV4cCI6MjA4NTgwODY1M30.PmDxpoWXP0zA2sJLgRxAfODH1JcjdFOoRMdnGZwJYLE';
+
     let shows = [];
     let flagged = JSON.parse(localStorage.getItem('xlii-flagged') || '{}');
     let activeTab = 'all';
     let activeFilter = 'all';
+    let dbReady = false;
 
     const COLLECTION_NAMES = {
       cornell_and_company: 'CORNELL AND COMPANY',
@@ -226,6 +230,20 @@
       const res = await fetch('reviews.json');
       shows = await res.json();
       document.getElementById('stats').textContent = shows.length + ' shows total';
+
+      // Load from DB, merge with localStorage (localStorage wins for conflicts)
+      const dbFlags = await loadFromDb();
+      if (dbFlags) {
+        // Merge: keep anything in localStorage, add anything from DB that's missing
+        for (const [date, data] of Object.entries(dbFlags)) {
+          if (!flagged[date]) flagged[date] = data;
+        }
+      }
+      // Sync all local flags up to DB
+      await syncLocalToDb();
+      localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
+      dbReady = true;
+
       renderTabs();
       render();
     }
@@ -256,8 +274,10 @@
     function toggleFlag(date) {
       if (flagged[date]) {
         delete flagged[date];
+        if (dbReady) deleteFromDb(date);
       } else {
         flagged[date] = { note: '', archiveOrg: false };
+        if (dbReady) saveToDb(date, flagged[date]);
       }
       localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
       updateSummary();
@@ -271,6 +291,7 @@
       if (noteEl) flagged[date].note = noteEl.value;
       if (checkEl) flagged[date].archiveOrg = checkEl.checked;
       localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
+      if (dbReady) saveToDb(date, flagged[date]);
     }
 
     // Migrate old boolean flags to new format
@@ -278,6 +299,69 @@
       if (v === true) flagged[k] = { note: '', archiveOrg: false };
     }
     localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
+
+    async function sbFetch(path, opts = {}) {
+      const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+        ...opts,
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': opts.prefer || 'return=minimal',
+          ...(opts.headers || {})
+        }
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (opts.prefer === 'return=representation' || opts.method === undefined)
+        return res.json().catch(() => null);
+      return null;
+    }
+
+    async function loadFromDb() {
+      try {
+        const rows = await sbFetch('xlii_review_flags?select=*');
+        if (!rows || rows.length === 0) return false;
+        const dbFlags = {};
+        for (const r of rows) {
+          if (r.flagged) {
+            dbFlags[r.date] = { note: r.note || '', archiveOrg: r.archive_org || false };
+          }
+        }
+        return dbFlags;
+      } catch (e) {
+        console.error('DB load failed:', e);
+        return false;
+      }
+    }
+
+    async function saveToDb(date, data) {
+      try {
+        await sbFetch('xlii_review_flags', {
+          method: 'POST',
+          body: JSON.stringify({
+            date,
+            note: data.note || '',
+            archive_org: data.archiveOrg || false,
+            flagged: true,
+            updated_at: new Date().toISOString()
+          }),
+          headers: { 'Prefer': 'resolution=merge-duplicates' },
+          prefer: 'return=minimal'
+        });
+      } catch (e) { console.error('DB save failed:', e); }
+    }
+
+    async function deleteFromDb(date) {
+      try {
+        await sbFetch('xlii_review_flags?date=eq.' + date, { method: 'DELETE' });
+      } catch (e) { console.error('DB delete failed:', e); }
+    }
+
+    async function syncLocalToDb() {
+      for (const [date, data] of Object.entries(flagged)) {
+        await saveToDb(date, data);
+      }
+    }
 
     function updateSummary() {
       const bar = document.getElementById('summary-bar');
