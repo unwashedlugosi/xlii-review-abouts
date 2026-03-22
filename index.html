@@ -109,8 +109,52 @@
       border: 1px solid #555;
       color: #aaa;
     }
-    .flag-btn:hover { border-color: #aa4444; color: #aa4444; }
-    .flag-btn.flagged-btn { background: #aa4444; color: #fff; border-color: #aa4444; }
+    .flag-btn:hover { border-color: #c4a35a; color: #c4a35a; }
+    .flag-btn.flagged-btn { background: #555; color: #fff; border-color: #888; }
+    .flag-form {
+      margin-top: 10px;
+      border-top: 1px solid #333;
+      padding-top: 10px;
+    }
+    .flag-note {
+      width: 100%;
+      font-family: inherit;
+      font-size: 0.8rem;
+      background: #1a1a1a;
+      border: 1px solid #555;
+      color: #e0d8c8;
+      padding: 8px;
+      margin-top: 6px;
+      resize: vertical;
+      min-height: 50px;
+    }
+    .flag-note::placeholder { color: #666; }
+    .flag-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    .flag-checkbox input { width: 16px; height: 16px; accent-color: #c4a35a; }
+    .flag-saved-note {
+      margin-top: 8px;
+      padding: 8px;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    .flag-saved-note .note-label { color: #c4a35a; font-size: 0.7rem; margin-bottom: 4px; }
+    .flag-saved-note .archive-tag {
+      display: inline-block;
+      border: 1px solid #888;
+      padding: 1px 6px;
+      font-size: 0.7rem;
+      color: #888;
+      margin-top: 4px;
+    }
     .stats {
       text-align: center;
       color: #888;
@@ -213,12 +257,27 @@
       if (flagged[date]) {
         delete flagged[date];
       } else {
-        flagged[date] = true;
+        flagged[date] = { note: '', archiveOrg: false };
       }
       localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
       updateSummary();
       render();
     }
+
+    function saveNote(date) {
+      if (!flagged[date]) return;
+      const noteEl = document.getElementById('note-' + date);
+      const checkEl = document.getElementById('archive-' + date);
+      if (noteEl) flagged[date].note = noteEl.value;
+      if (checkEl) flagged[date].archiveOrg = checkEl.checked;
+      localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
+    }
+
+    // Migrate old boolean flags to new format
+    for (const [k, v] of Object.entries(flagged)) {
+      if (v === true) flagged[k] = { note: '', archiveOrg: false };
+    }
+    localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
 
     function updateSummary() {
       const bar = document.getElementById('summary-bar');
@@ -232,7 +291,24 @@
     }
 
     function renderShow(s) {
-      const isFlagged = flagged[s.date];
+      const flagData = flagged[s.date];
+      const isFlagged = !!flagData;
+      const note = flagData ? (flagData.note || '') : '';
+      const isArchive = flagData ? (flagData.archiveOrg || false) : false;
+
+      let flagSection = '';
+      if (isFlagged) {
+        flagSection = `
+          <div class="flag-form">
+            <label class="flag-checkbox">
+              <input type="checkbox" id="archive-${s.date}" ${isArchive ? 'checked' : ''} onchange="saveNote('${s.date}')">
+              Just archive.org comments — needs real research
+            </label>
+            <textarea class="flag-note" id="note-${s.date}" placeholder="Optional note..." onblur="saveNote('${s.date}')">${escapeHtml(note)}</textarea>
+          </div>
+        `;
+      }
+
       return `
         <div class="show ${isFlagged ? 'flagged' : ''}">
           <div class="show-header">
@@ -245,6 +321,7 @@
               ${isFlagged ? '✕ UNFLAG' : '⚑ FLAG FOR REVISION'}
             </button>
           </div>
+          ${flagSection}
         </div>
       `;
     }
