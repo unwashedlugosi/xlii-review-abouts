@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XLII — Review All Abouts</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', monospace;
+      background: #1a1a1a;
+      color: #e0d8c8;
+      padding: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 1.4rem;
+      color: #c4a35a;
+      text-align: center;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 24px;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .tab {
+      padding: 8px 16px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #aaa;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.85rem;
+      letter-spacing: 1px;
+    }
+    .tab:hover { border-color: #c4a35a; color: #c4a35a; }
+    .tab.active {
+      background: #c4a35a;
+      color: #1a1a1a;
+      border-color: #c4a35a;
+      font-weight: bold;
+    }
+    .collection-header {
+      font-size: 1.1rem;
+      color: #c4a35a;
+      border-bottom: 1px solid #444;
+      padding-bottom: 8px;
+      margin: 32px 0 16px;
+      letter-spacing: 1px;
+    }
+    .show-count {
+      color: #888;
+      font-size: 0.8rem;
+      font-weight: normal;
+    }
+    .show {
+      background: #222;
+      border: 1px solid #333;
+      margin-bottom: 16px;
+      padding: 16px;
+    }
+    .show-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .show-date {
+      font-size: 1rem;
+      color: #c4a35a;
+      font-weight: bold;
+    }
+    .show-venue {
+      font-size: 0.85rem;
+      color: #999;
+    }
+    .show-review {
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: #d4cbb8;
+      white-space: pre-wrap;
+    }
+    .show.flagged { border-color: #aa4444; }
+    .flag-bar {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+      gap: 8px;
+    }
+    .flag-btn {
+      font-family: inherit;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      cursor: pointer;
+      background: #2a2a2a;
+      border: 1px solid #555;
+      color: #aaa;
+    }
+    .flag-btn:hover { border-color: #aa4444; color: #aa4444; }
+    .flag-btn.flagged-btn { background: #aa4444; color: #fff; border-color: #aa4444; }
+    .stats {
+      text-align: center;
+      color: #888;
+      font-size: 0.8rem;
+      margin-bottom: 20px;
+    }
+    .filter-bar {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .filter-btn {
+      font-family: inherit;
+      font-size: 0.75rem;
+      padding: 4px 12px;
+      cursor: pointer;
+      background: #2a2a2a;
+      border: 1px solid #555;
+      color: #aaa;
+    }
+    .filter-btn:hover { border-color: #c4a35a; }
+    .filter-btn.active { background: #aa4444; color: #fff; border-color: #aa4444; }
+    .summary-bar {
+      text-align: center;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      padding: 10px;
+      margin-bottom: 20px;
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    .summary-bar strong { color: #aa4444; }
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      .show { padding: 12px; }
+      .show-header { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <h1>XLII — SHOW ABOUTS</h1>
+  <div class="subtitle">Review all show descriptions by collection</div>
+  <div class="stats" id="stats"></div>
+  <div class="tabs" id="tabs"></div>
+  <div class="filter-bar">
+    <button class="filter-btn" id="filter-all" onclick="setFilter('all')">ALL</button>
+    <button class="filter-btn" id="filter-flagged" onclick="setFilter('flagged')">FLAGGED ONLY</button>
+  </div>
+  <div class="summary-bar" id="summary-bar" style="display:none"></div>
+  <div id="content"></div>
+
+  <script>
+    let shows = [];
+    let flagged = JSON.parse(localStorage.getItem('xlii-flagged') || '{}');
+    let activeTab = 'all';
+    let activeFilter = 'all';
+
+    const COLLECTION_NAMES = {
+      cornell_and_company: 'CORNELL AND COMPANY',
+      wall_of_sound: 'WALL OF SOUND',
+      young_bettys: 'YOUNG BETTYS',
+      new_animal: 'NEW ANIMAL'
+    };
+
+    const COLLECTION_ORDER = ['cornell_and_company', 'wall_of_sound', 'young_bettys', 'new_animal'];
+
+    async function init() {
+      const res = await fetch('reviews.json');
+      shows = await res.json();
+      document.getElementById('stats').textContent = shows.length + ' shows total';
+      renderTabs();
+      render();
+    }
+
+    function renderTabs() {
+      const tabs = document.getElementById('tabs');
+      const allTab = `<button class="tab ${activeTab === 'all' ? 'active' : ''}" onclick="setTab('all')">ALL (${shows.length})</button>`;
+      const collTabs = COLLECTION_ORDER.map(c => {
+        const count = shows.filter(s => (s.cases || []).includes(c)).length;
+        return `<button class="tab ${activeTab === c ? 'active' : ''}" onclick="setTab('${c}')">${COLLECTION_NAMES[c]} (${count})</button>`;
+      }).join('');
+      tabs.innerHTML = allTab + collTabs;
+    }
+
+    function setTab(tab) {
+      activeTab = tab;
+      renderTabs();
+      render();
+    }
+
+    function setFilter(f) {
+      activeFilter = f;
+      document.getElementById('filter-all').className = 'filter-btn' + (f === 'all' ? ' active' : '');
+      document.getElementById('filter-flagged').className = 'filter-btn' + (f === 'flagged' ? ' active' : '');
+      render();
+    }
+
+    function toggleFlag(date) {
+      if (flagged[date]) {
+        delete flagged[date];
+      } else {
+        flagged[date] = true;
+      }
+      localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
+      updateSummary();
+      render();
+    }
+
+    function updateSummary() {
+      const bar = document.getElementById('summary-bar');
+      const count = Object.keys(flagged).length;
+      if (count === 0) {
+        bar.style.display = 'none';
+      } else {
+        bar.style.display = 'block';
+        bar.innerHTML = `<strong>${count}</strong> show${count === 1 ? '' : 's'} flagged for revision`;
+      }
+    }
+
+    function renderShow(s) {
+      const isFlagged = flagged[s.date];
+      return `
+        <div class="show ${isFlagged ? 'flagged' : ''}">
+          <div class="show-header">
+            <span class="show-date">${s.date}</span>
+            <span class="show-venue">${s.venue_name || ''}${s.city ? ', ' + s.city : ''}${s.state ? ', ' + s.state : ''}</span>
+          </div>
+          <div class="show-review">${escapeHtml(s.review || '(no review)')}</div>
+          <div class="flag-bar">
+            <button class="flag-btn ${isFlagged ? 'flagged-btn' : ''}" onclick="toggleFlag('${s.date}')">
+              ${isFlagged ? '✕ UNFLAG' : '⚑ FLAG FOR REVISION'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function render() {
+      const content = document.getElementById('content');
+      let filtered = shows;
+
+      if (activeTab !== 'all') {
+        filtered = filtered.filter(s => (s.cases || []).includes(activeTab));
+      }
+
+      if (activeFilter === 'flagged') {
+        filtered = filtered.filter(s => flagged[s.date]);
+      }
+
+      if (activeTab !== 'all') {
+        // Single collection — just list shows sorted by date
+        filtered.sort((a, b) => a.date.localeCompare(b.date));
+        content.innerHTML = filtered.map(renderShow).join('');
+      } else {
+        // All — group by collection
+        let html = '';
+        for (const c of COLLECTION_ORDER) {
+          const collShows = filtered.filter(s => (s.cases || []).includes(c));
+          if (collShows.length === 0) continue;
+          collShows.sort((a, b) => a.date.localeCompare(b.date));
+          html += `<div class="collection-header">${COLLECTION_NAMES[c]} <span class="show-count">(${collShows.length} shows)</span></div>`;
+          html += collShows.map(renderShow).join('');
+        }
+        content.innerHTML = html;
+      }
+
+      updateSummary();
+    }
+
+    init();
+  </script>
+</body>
+</html>
