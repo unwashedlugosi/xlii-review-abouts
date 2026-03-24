@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>XLII — Review All Abouts</title>
+  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="icon" href="/favicon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Review Abouts">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -203,11 +208,25 @@
   <div class="filter-bar">
     <button class="filter-btn" id="filter-all" onclick="setFilter('all')">ALL</button>
     <button class="filter-btn" id="filter-flagged" onclick="setFilter('flagged')">FLAGGED ONLY</button>
+    <button class="filter-btn" onclick="shareLocation()" style="margin-left:auto">SHARE LINK</button>
   </div>
   <div class="summary-bar" id="summary-bar" style="display:none"></div>
   <div id="content"></div>
 
   <script>
+    function shareLocation() {
+      const url = window.location.href;
+      if (navigator.share) {
+        navigator.share({ title: 'XLII — Review Abouts', url: url });
+      } else {
+        navigator.clipboard.writeText(url).then(() => {
+          const btn = event.target;
+          btn.textContent = 'COPIED!';
+          setTimeout(() => { btn.textContent = 'SHARE LINK'; }, 1500);
+        });
+      }
+    }
+
     const SUPABASE_URL = 'https://dhwllgdxpeucldtmzhme.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRod2xsZ2R4cGV1Y2xkdG16aG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyMzI2NTMsImV4cCI6MjA4NTgwODY1M30.PmDxpoWXP0zA2sJLgRxAfODH1JcjdFOoRMdnGZwJYLE';
 
