@@ -116,6 +116,22 @@
     }
     .flag-btn:hover { border-color: #c4a35a; color: #c4a35a; }
     .flag-btn.flagged-btn { background: #555; color: #fff; border-color: #888; }
+    .listen-btn {
+      font-family: inherit; font-size: 0.75rem; padding: 4px 10px;
+      cursor: pointer; background: #2a2a2a; border: 1px solid #555; color: #aaa;
+    }
+    .listen-btn:hover { border-color: #c4a35a; color: #c4a35a; }
+    .listen-btn.speaking { background: #c4a35a; color: #1a1a1a; border-color: #c4a35a; }
+    .star-btn {
+      font-family: inherit; font-size: 0.75rem; padding: 4px 10px;
+      cursor: pointer; background: #2a2a2a; border: 1px solid #555; color: #aaa;
+    }
+    .star-btn:hover { border-color: #c4a35a; color: #c4a35a; }
+    .star-btn.starred { background: #c4a35a; color: #1a1a1a; border-color: #c4a35a; }
+    .show.reviewed { opacity: 0.3; }
+    .show.reviewed:hover { opacity: 0.7; }
+    .show.reviewed .show-review { max-height: 40px; overflow: hidden; }
+    .show.reviewed:hover .show-review { max-height: none; }
     .flag-form {
       margin-top: 10px;
       border-top: 1px solid #333;
@@ -232,9 +248,12 @@
 
     let shows = [];
     let flagged = JSON.parse(localStorage.getItem('xlii-flagged') || '{}');
+    let starred = JSON.parse(localStorage.getItem('xlii-starred') || '{}');
     let activeTab = 'all';
     let activeFilter = 'all';
     let dbReady = false;
+    let currentUtterance = null;
+    let speakingDate = null;
 
     const COLLECTION_NAMES = {
       cornell_and_company: 'CORNELL AND COMPANY',
@@ -251,16 +270,21 @@
       document.getElementById('stats').textContent = shows.length + ' shows total';
 
       // Load from DB, merge with localStorage (localStorage wins for conflicts)
-      const dbFlags = await loadFromDb();
-      if (dbFlags) {
-        // Merge: keep anything in localStorage, add anything from DB that's missing
-        for (const [date, data] of Object.entries(dbFlags)) {
+      const dbData = await loadFromDb();
+      if (dbData.flags) {
+        for (const [date, data] of Object.entries(dbData.flags)) {
           if (!flagged[date]) flagged[date] = data;
+        }
+      }
+      if (dbData.stars) {
+        for (const [date, val] of Object.entries(dbData.stars)) {
+          if (!starred[date]) starred[date] = val;
         }
       }
       // Sync all local flags up to DB
       await syncLocalToDb();
       localStorage.setItem('xlii-flagged', JSON.stringify(flagged));
+      localStorage.setItem('xlii-starred', JSON.stringify(starred));
       dbReady = true;
 
       renderTabs();
@@ -339,17 +363,21 @@
     async function loadFromDb() {
       try {
         const rows = await sbFetch('xlii_review_flags?select=*');
-        if (!rows || rows.length === 0) return false;
+        if (!rows || rows.length === 0) return { flags: {}, stars: {} };
         const dbFlags = {};
+        const dbStars = {};
         for (const r of rows) {
           if (r.flagged) {
             dbFlags[r.date] = { note: r.note || '', archiveOrg: r.archive_org || false };
           }
+          if (r.gold_star) {
+            dbStars[r.date] = true;
+          }
         }
-        return dbFlags;
+        return { flags: dbFlags, stars: dbStars };
       } catch (e) {
         console.error('DB load failed:', e);
-        return false;
+        return { flags: {}, stars: {} };
       }
     }
 
@@ -382,6 +410,71 @@
       }
     }
 
+    // --- LISTEN (text-to-speech) ---
+    function listenTo(date) {
+      if (speakingDate === date && speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+        speakingDate = null;
+        render();
+        return;
+      }
+      speechSynthesis.cancel();
+      const show = shows.find(s => s.date === date);
+      if (!show || !show.review) return;
+      const text = show.review.toLowerCase().replace(/\b([a-z])/g, (m, c) => c.toUpperCase());
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = 1.1;
+      utt.onend = () => { speakingDate = null; render(); };
+      utt.onerror = () => { speakingDate = null; render(); };
+      speakingDate = date;
+      speechSynthesis.speak(utt);
+      render();
+    }
+
+    // --- GOLD STAR ---
+    function toggleStar(date) {
+      if (starred[date]) {
+        delete starred[date];
+        deleteStarFromDb(date);
+      } else {
+        starred[date] = true;
+        saveStarToDb(date);
+      }
+      localStorage.setItem('xlii-starred', JSON.stringify(starred));
+      render();
+    }
+
+    async function saveStarToDb(date) {
+      try {
+        await sbFetch('xlii_review_flags', {
+          method: 'POST',
+          body: JSON.stringify({ date, note: starred[date] ? (flagged[date]?.note || '') : '', archive_org: flagged[date]?.archiveOrg || false, flagged: !!flagged[date], gold_star: true, updated_at: new Date().toISOString() }),
+          headers: { 'Prefer': 'resolution=merge-duplicates' },
+          prefer: 'return=minimal'
+        });
+      } catch (e) { console.error('Star save failed:', e); }
+    }
+
+    async function deleteStarFromDb(date) {
+      try {
+        // Update the row to remove gold_star, don't delete the row (might have flags)
+        await sbFetch('xlii_review_flags?date=eq.' + date, {
+          method: 'PATCH',
+          body: JSON.stringify({ gold_star: false, updated_at: new Date().toISOString() }),
+          prefer: 'return=minimal'
+        });
+      } catch (e) { console.error('Star delete failed:', e); }
+    }
+
+    // --- GRAY OUT REVIEWED ---
+    function getLastFlaggedDate(showList) {
+      let lastIdx = -1;
+      for (let i = 0; i < showList.length; i++) {
+        if (flagged[showList[i].date] || starred[showList[i].date]) lastIdx = i;
+      }
+      return lastIdx;
+    }
+
     function updateSummary() {
       const bar = document.getElementById('summary-bar');
       const count = Object.keys(flagged).length;
@@ -393,9 +486,11 @@
       }
     }
 
-    function renderShow(s) {
+    function renderShow(s, isReviewed) {
       const flagData = flagged[s.date];
       const isFlagged = !!flagData;
+      const isStarred = !!starred[s.date];
+      const isSpeaking = speakingDate === s.date;
       const note = flagData ? (flagData.note || '') : '';
       const isArchive = flagData ? (flagData.archiveOrg || false) : false;
 
@@ -412,16 +507,24 @@
         `;
       }
 
+      const reviewedClass = isReviewed ? ' reviewed' : '';
+
       return `
-        <div class="show ${isFlagged ? 'flagged' : ''}">
+        <div class="show ${isFlagged ? 'flagged' : ''}${isStarred ? ' starred' : ''}${reviewedClass}">
           <div class="show-header">
-            <span class="show-date">${s.date}</span>
+            <span class="show-date">${isStarred ? '⭐ ' : ''}${s.date}</span>
             <span class="show-venue">${s.venue_name || ''}${s.city ? ', ' + s.city : ''}${s.state ? ', ' + s.state : ''}</span>
           </div>
           <div class="show-review">${escapeHtml(s.review || '(no review)')}</div>
           <div class="flag-bar">
+            <button class="listen-btn ${isSpeaking ? 'speaking' : ''}" onclick="listenTo('${s.date}')">
+              ${isSpeaking ? '■ STOP' : '▶ LISTEN'}
+            </button>
+            <button class="star-btn ${isStarred ? 'starred' : ''}" onclick="toggleStar('${s.date}')">
+              ${isStarred ? '⭐ GOLD STAR' : '☆ GOLD STAR'}
+            </button>
             <button class="flag-btn ${isFlagged ? 'flagged-btn' : ''}" onclick="toggleFlag('${s.date}')">
-              ${isFlagged ? '✕ UNFLAG' : '⚑ FLAG FOR REVISION'}
+              ${isFlagged ? '✕ UNFLAG' : '⚑ FLAG'}
             </button>
           </div>
           ${flagSection}
@@ -435,6 +538,11 @@
       return div.innerHTML;
     }
 
+    function renderShowList(showList) {
+      const lastIdx = getLastFlaggedDate(showList);
+      return showList.map((s, i) => renderShow(s, i < lastIdx)).join('');
+    }
+
     function render() {
       const content = document.getElementById('content');
       let filtered = shows;
@@ -444,22 +552,20 @@
       }
 
       if (activeFilter === 'flagged') {
-        filtered = filtered.filter(s => flagged[s.date]);
+        filtered = filtered.filter(s => flagged[s.date] || starred[s.date]);
       }
 
       if (activeTab !== 'all') {
-        // Single collection — just list shows sorted by date
         filtered.sort((a, b) => a.date.localeCompare(b.date));
-        content.innerHTML = filtered.map(renderShow).join('');
+        content.innerHTML = renderShowList(filtered);
       } else {
-        // All — group by collection
         let html = '';
         for (const c of COLLECTION_ORDER) {
           const collShows = filtered.filter(s => (s.cases || []).includes(c));
           if (collShows.length === 0) continue;
           collShows.sort((a, b) => a.date.localeCompare(b.date));
           html += `<div class="collection-header">${COLLECTION_NAMES[c]} <span class="show-count">(${collShows.length} shows)</span></div>`;
-          html += collShows.map(renderShow).join('');
+          html += renderShowList(collShows);
         }
         content.innerHTML = html;
       }
