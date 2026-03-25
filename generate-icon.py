@@ -2,7 +2,7 @@ import google.genai as genai
 from google.genai import types
 import base64, sys
 
-client = genai.Client(api_key="REDACTED_GEMINI_KEY")
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 prompt = """Generate a square app icon (1024x1024). The icon should be:
 - A vintage clipboard or editor's notepad with a red pencil or pen marking up text
